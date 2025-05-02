@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Echo Pilot</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+      background: url('bg.png.png') no-repeat center center fixed;
+      background-size: cover;
+      #routeBox {
+  display: none;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 300px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 1100;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body.navigating #routeBox {
+  display: block;
+}
+
+    }
+
+    h1 {
+      text-align: center;
+      color: white;
+      font-size: 48px;
+      margin-top: 20px;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.7);
+      animation: slideDown 2s ease-out;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 70%;
+      max-width: 700px;
+      margin: 20px auto;
+      background-color: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+    }
+
+    .controls-row {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      width: 100%;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    input, select, button {
+      flex: 1;
+      padding: 12px;
+      font-size: 16px;
+      text-align: center;
+      border-radius: 8px;
+      border: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+
+    button {
+      background-color: #ffffffcc;
+      cursor: pointer;
+      transition: background-color 0.3s, transform 0.3s;
+    }
+
+    button:hover {
+      background-color: #ffffff;
+      transform: scale(1.05);
+    }
+
+    #map {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      width: 100vw;
+      z-index: 1000;
+      <div id="routeBox"></div>
+
+
+    }
+
+    body.navigating #map {
+      display: block;
+    }
+
+    body.navigating .controls {
+      display: none;
+    }
+
+    label {
+      color: white;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    @keyframes slideDown {
+      from {
+        transform: translateY(-100px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    #translateBox {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+    }
+
+    #translateToggle {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    #languageSelect {
+      padding: 6px;
+      font-size: 14px;
+      border-radius: 6px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Translate dropdown -->
+<div id="translateBox">
+  <button id="translateToggle">🌐 Translate</button>
+  <select id="languageSelect">
+    <option value="">Select language</option>
+    <option value="en">English</option>
+    <option value="ta">Tamil</option>
+    <option value="te">Telugu</option>
+    <option value="hi">Hindi</option>
+    <option value="ml">Malayalam</option>
+    <option value="it">Italian</option>
+  </select>
+</div>
+
+<h1>Echopilot</h1>
+
+<div class="controls">
+  <div class="controls-row">
+    <input id="originInput" type="text" placeholder="Origin" />
+    <button onclick="speakOrigin()">Speak Origin 🎤</button>
+  </div>
+  <div class="controls-row">
+    <input id="destinationInput" type="text" placeholder="Destination" />
+    <button onclick="speakDestination()">Speak Destination 🎤</button>
+  </div>
+  <div class="controls-row">
+    <select id="voiceSelect"></select>
+  </div>
+  <div class="controls-row">
+    <label>Rate:</label>
+    <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1">
+    <label>Pitch:</label>
+    <input type="range" id="pitch" min="0" max="2" step="0.1" value="1">
+  </div>
+  <div class="controls-row">
+    <button onclick="startNavigation()">🗺️ Start Navigation</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<!-- Leaflet + Routing -->
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+<!-- Google Translate -->
+<div id="google_translate_element" style="display:none;"></div>
+<script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+
+<script>
+  let origin = '';
+  let destination = '';
+  let map;
+  let control;
+  let userMarker;
+  let voices = [];
+  let routeInstructions = [];
+  let currentInstructionIndex = 0;
+  let enableTracking = false;
+
+  function initMap() {
+  if (!navigator.geolocation) {
+    alert("Geolocation not supported");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(position => {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+
+    map = L.map('map').setView([lat, lon], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    userMarker = L.marker([lat, lon]).addTo(map).bindPopup('You are here').openPopup();
+
+    trackLocation(); // begin tracking from actual location
+  }, error => {
+    console.error("Initial geolocation failed:", error);
+    alert("Could not get your location.");
+    // fallback if needed
+    map = L.map('map').setView([13.0827, 80.2707], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    trackLocation();
+  }, { enableHighAccuracy: true });
+}
+
+
+  function trackLocation() {
+    if (!navigator.geolocation) {
+      alert("Geolocation not supported");
+      return;
+    }
+    navigator.geolocation.watchPosition(position => {
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+      if (!userMarker) {
+        userMarker = L.marker([lat, lon]).addTo(map).bindPopup('You are here').openPopup();
+      } else {
+        userMarker.setLatLng([lat, lon]);
+      }
+
+      if (!map.getBounds().contains([lat, lon])) {
+        map.panTo([lat, lon]);
+      }
+
+      checkProximityToInstruction(lat, lon);
+    }, error => {
+      console.error("Geolocation error:", error);
+      alert("Unable to fetch location.");
+    }, { enableHighAccuracy: true });
+  }
+
+  function speakOrigin() {
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'ta-IN';
+    recognition.start();
+    recognition.onresult = function(event) {
+      origin = event.results[0][0].transcript;
+      document.getElementById('originInput').value = origin;
+    };
+  }
+
+  function speakDestination() {
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'ta-IN';
+    recognition.start();
+    recognition.onresult = function(event) {
+      destination = event.results[0][0].transcript;
+      document.getElementById('destinationInput').value = destination;
+    };
+  }
+
+  function startNavigation() {
+    origin = document.getElementById('originInput').value;
+    destination = document.getElementById('destinationInput').value;
+
+    if (!origin || !destination) {
+      alert("Please provide both origin and destination!");
+      return;
+    }
+
+    document.body.classList.add("navigating");
+
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 300);
+
+    if (control) {
+      map.removeControl(control);
+    }
+
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${origin}`)
+      .then(response => response.json())
+      .then(data => {
+        const startLat = data[0].lat;
+        const startLon = data[0].lon;
+
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${destination}`)
+          .then(response => response.json())
+          .then(data2 => {
+            const endLat = data2[0].lat;
+            const endLon = data2[0].lon;
+
+            control = L.Routing.control({
+              waypoints: [
+                L.latLng(startLat, startLon),
+                L.latLng(endLat, endLon)
+              ],
+              routeWhileDragging: true,
+              router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+              createMarker: () => null
+            }).on('routesfound', function(e) {
+              routeInstructions = e.routes[0].instructions.map(step => ({
+                text: step.text,
+                latLng: step.latLng
+              }));
+              currentInstructionIndex = 0;
+
+              speakAllInstructions(() => {
+                speakText("Now tracking your movement...");
+                enableTracking = true;
+              });
+            }).addTo(map);
+          });
+      });
+  }
+
+  function speakAllInstructions(callback) {
+    let i = 0;
+    function speakNext() {
+      if (i < routeInstructions.length) {
+        speakText(routeInstructions[i].text);
+        setTimeout(speakNext, 3000);
+        i++;
+      } else {
+        callback();
+      }
+    }
+    speakNext();
+  }
+
+  function loadVoices() {
+    voices = window.speechSynthesis.getVoices();
+    const voiceSelect = document.getElementById('voiceSelect');
+    voiceSelect.innerHTML = '';
+    voices.forEach((voice, index) => {
+      const option = document.createElement('option');
+      option.value = index;
+      option.text = `${voice.name} (${voice.lang})`;
+      voiceSelect.appendChild(option);
+    });
+  }
+
+  function speakText(text) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const selectedVoice = voices[document.getElementById('voiceSelect').value];
+    utterance.voice = selectedVoice;
+    utterance.rate = parseFloat(document.getElementById('rate').value);
+    utterance.pitch = parseFloat(document.getElementById('pitch').value);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function checkProximityToInstruction(userLat, userLng) {
+    if (!enableTracking || currentInstructionIndex >= routeInstructions.length) return;
+    const instruction = routeInstructions[currentInstructionIndex];
+    const distance = map.distance([userLat, userLng], instruction.latLng);
+    if (distance < 30) {
+      speakText(instruction.text);
+      currentInstructionIndex++;
+    }
+  }
+
+  function googleTranslateElementInit() {
+    new google.translate.TranslateElement({
+      pageLanguage: 'en',
+      includedLanguages: 'en,ta,it,te,ml,hi',
+      layout: google.translate.TranslateElement.InlineLayout.SIMPLE
+    }, 'google_translate_element');
+  }
+
+  document.getElementById('translateToggle').onclick = () => {
+    const langSelect = document.getElementById('languageSelect');
+    langSelect.style.display = langSelect.style.display === 'none' ? 'block' : 'none';
+  };
+
+  document.getElementById('languageSelect').onchange = function () {
+    const lang = this.value;
+    const select = document.querySelector('.goog-te-combo');
+    if (select) {
+      select.value = lang;
+      select.dispatchEvent(new Event('change'));
+    }
+  };
+
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+  window.onload = initMap;
+</script>
+</body>
+</html>
